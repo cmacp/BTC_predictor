@@ -1,0 +1,413 @@
+---
+title: "BTC_closing_prediction"
+author: "Cesar Macedo Perez"
+date: "21/4/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r include=FALSE}
+library(dslabs)
+library(tidyverse)
+library(caret)
+library(lubridate)
+library(readxl)
+library(psych)
+library(MASS)
+library(rpart)
+
+exchange_mxn <- read_excel("~/Cesar/edX/Data Science/9. Capstone Project/My ML Algorithm/exchange_mxn.xlsx")
+
+exchange_mxn <- exchange_mxn %>% mutate(Date = Date - 25569)
+```
+
+# Introduction
+
+On January 3, 2008, born a completely new system of *Electronic Cash* based in peer-to-peer exchange and, without any third parties thaa controlled it. This new *e-cash* was named **Bitcoin** and was created by a person, or group of people, under the pseudonym of Satoshi Nakamoto. You can read more about its origin in the Bitcoin Foundation page at http://www.bitcoin.org/bitcoin.pdf.
+
+Since then, Bitcoin has been the target of many studies and controversies, mostly because the base Technology, called Blockchain, allows the users to remain completely anonymous and, unfortunately, this has been used for illegal activities.
+
+Regardless of this, Bitcoin has become one of the most important speculative assets all over the world, mostly because of its huge **volatility**. Just to have an idea, the Bitcoin price in April 2010 was about USD 0.003 and, since then, its price started to grow, by January 2017, its price was USD 19,798, yes, an amazing grow of almost 660 million percent. While I'm writing this, you can buy a Bitcoin for USD 6,901, again, yes, a fall of 65% percent.
+
+And that's why I decided to make this brief analysis, due to this extreme volatility many people have become rich and many more became poor, losing all their life savings. Just a few people understand how this Cryptocurrency works and what variables drive its price behavior.
+
+The motivation of this study is to give a better understanding of how Bitcoin works and what's behind Investor psychology when deciding to move to Bitcoin depending on the behavior of other variables. I'm not trying to give any kind of Financial Advice and much less to offer an "easy money" approach to Cryptocurrencies Market.
+
+# Objective
+
+Create an algorithm that predicts the Closing Price of Bitcoin using the opening Prices/Indexes of selected Exchange Rates, Cryptocurrencies and Stock Prices, and Indexes in the Mexican Financial Market.
+
+# The *exchange_mxn* database
+
+For this project I created a database with the Bitcoin Opening and Closing Prices and compared them with another 17 variables (Cryptocurrencies and Stocks Prices, Commodities and Financial Indexes), the date range goes from 2018-02-15 to 2020-04-15. All prices are at the beginning of each session, from Monday to Friday and, in MXN(Mexican Pesos).
+
+***Source:*** https//mx.investing.com
+
+DAY - Day of the week ranked from 1 to 7, starting Monday = 1.
+
+QUARTER - Quarter of the year, Example: 1st quarter covers from January to March of the same year.
+
+DATE - the date in format yyyy/mm/dd showed as number.
+
+BTC_open - Bitcoin price at the beginning of the session.
+
+BTC_close - Bitcoin price at the end of the session.
+
+XRP - Cryptocurrency Ripple price.
+
+ETH - Cryptocurrency Ethereum price.
+
+USD - US Dollar/MXN exchange rate.
+
+EUR - Euro/MXN exchange rate.
+
+JPY - Japanese Yen/MXN exchange rate.
+
+KRW - South Korean Won/MXN exchange rate.
+
+SAR - Saudi Arabia Riyal/MXN exchange rate.
+
+AED - Emirati Dirham/MXN exchange rate.
+
+GBP - Sterling Pound/MXN exchange rate.
+
+INR - India Rupee/MXN exchange rate.
+
+RUB - Russian Ruble/MXN exchange rate.
+
+OIL_WTI - West Texas Oil price per Barrel.
+
+GOLD - Gold price per Ounce.
+
+NASDAQ - Nasdaq Composite Index in Points.
+
+DOW - Dow Jones Index in Points.
+
+IPC - Indice de Precios y Cotizaciones (Mexican Prices and Quotations Index) in Points.
+
+AMZN - Amazon Stock Price.
+
+BABAN - Ali Baba Group Stock Price.
+
+# Exploring the data
+
+Let's explore our data summary:
+
+```{r echo=FALSE}
+summary(exchange_mxn)
+```
+
+# Bitcoin variability
+```{r include=FALSE}
+exchange_mxn <- exchange_mxn %>% mutate(var_rate = (BTC_close/BTC_open)-1)
+```
+A new column was added to the dataset, the column "var_rate" that is the daily variability in the Bitcoin Price, it was calculated with the next formula:
+
+var_rate = (Bitcoin close / Bitcoin open) - 1
+
+Let's look a the result:
+
+```{r}
+summary(exchange_mxn$var_rate)
+```
+
+**Apparently**, the Bitcoin it's a very stable asset, with a Median and a Mean really close to zero, but the difference between the Min and the Max variation is 55.7%.
+
+```{r echo=FALSE}
+exchange_mxn %>% ggplot(aes(x = as_date(Date), y = var_rate)) +
+  theme_bw() +
+  geom_line() +
+  labs(y = "Daily Variation",
+       x = "Date",
+       title = "Daily Variation in Bitcoin Price")
+```
+
+Now you can see the high variability of this asset. That's why, mean and median look so small, it's because of the extreme values that the mean is pushed towards zero.
+
+Let's compare Bitcoin with the behavior of three more "Stable" Features: USD/MXN, GOLD and AMAZON Stock price.
+
+```{r echo=FALSE}
+par(mfcol = c(2,2))
+plot(as_date(exchange_mxn$Date), exchange_mxn$BTC_close)
+plot(as_date(exchange_mxn$Date), exchange_mxn$USD)
+plot(as_date(exchange_mxn$Date), exchange_mxn$GOLD)
+plot(as_date(exchange_mxn$Date), exchange_mxn$AMZN)
+par(mfcol = c(1,1))
+```
+
+There is a clear peak as of March 2020 and that is due to the COVID-19 effect, this effect is visible in all three Features compared but, again, Bitcoin contradicts this behavior and remains stable, affirming its reputation for unpredictability.
+
+# Correlations
+
+So, with such an unpredictable asset, we need to determine which factors drive its value so, it's time to search for correlations.
+
+First, let's look at the correlation of each feature with the Bitcoin closing price. The Feature "var_rate" is omitted since its correlation is useful for analysis.
+
+```{r echo=FALSE}
+correlations <- cor(exchange_mxn[,-24])
+
+data.frame(Correlations = correlations[,5])
+
+plot(cor(exchange_mxn[,-c(24)])[,5],
+     main = "Correlation BTC_close ~ All Features",
+     sub = "Excluding var_rate",
+     xlab = "Feature",
+     ylab = "Correlation")
+```
+
+The observed correlations are relatively low, go from -0.253 (KRW) to 0.4279(NASDAQ). We will have to prove if lower correlations are significant, to omit those features that won't help us to predict Y.
+
+## Calculating p-value.
+
+We are going to calculate the p-value for every Correlation between -0.1 and 0.1 and, if this value is bigger than our significance level of 0.05, then we can conclude than there is no correlation between Y(BTC_close) and our Feature X.
+
+**Correlations between +/- 0.10:**
+
+```{r echo=FALSE}
+btc_cor <- data.frame(Feature = row.names(correlations), corBTC = correlations[ ,5])
+
+btc_cor %>% filter(corBTC <= 0.1 & corBTC >= -0.1)
+```
+
+Computing the p-value:
+
+```{r echo=TRUE}
+cor.test(exchange_mxn$BTC_close, exchange_mxn$Day)[3]
+cor.test(exchange_mxn$BTC_close, exchange_mxn$Quarter)[3]
+cor.test(exchange_mxn$BTC_close, exchange_mxn$USD)[3]
+cor.test(exchange_mxn$BTC_close, exchange_mxn$EUR)[3]
+cor.test(exchange_mxn$BTC_close, exchange_mxn$SAR)[3]
+cor.test(exchange_mxn$BTC_close, exchange_mxn$AED)[3]
+cor.test(exchange_mxn$BTC_close, exchange_mxn$INR)[3]
+cor.test(exchange_mxn$BTC_close, exchange_mxn$OIL_WTI)[3]
+cor.test(exchange_mxn$BTC_close, exchange_mxn$IPC)[3]
+```
+
+Based in the past results, we can conclude that BTC_closing is uncorrelated to almost all the detected features, with excepmtion of the Feature INR whose p-value is 0.0337.
+
+Now we have to adjust our dataset to include our valid features.
+
+```{r echo=FALSE}
+exchange_mxn <- exchange_mxn[, -c(1, 2, 8, 9, 12, 13, 17, 21, 24)]
+head(exchange_mxn)
+```
+
+## Correlations between features.
+
+### Cryptocurrencies
+
+```{r echo=FALSE}
+pairs.panels(exchange_mxn[,3:5], gap=0)
+```
+
+We can see a positive correlation between Cryptocurrencies, especially between Ripple and Ethereum but, not surprisingly, little correlation of both vs Bitcoin, even when the Bitcoin is Known because it moves the prices of the majority of Cryptocurrencies in the world.
+
+## Exchanges
+
+```{r echo=FALSE}
+pairs.panels(exchange_mxn[,6:10], gap=0)
+```
+
+Here, a high positive correlation is seen across all exchange rates.
+
+## Indexes
+
+```{r echo=FALSE}
+pairs.panels(exchange_mxn[,12:13], gap=0)
+```
+
+As was expected, a high positive correlation between US Indexes.
+
+## Stocks
+
+```{r echo=FALSE}
+pairs.panels(exchange_mxn[,14:15], gap=0)
+```
+
+A positive correlation is seen but is much evident in lower and higher prices.
+
+# Fitting models
+
+We are going to use a model-based approach, to do that, we are going to train four models *knn*, *glm*, *rf*, *blassoAveraged*. Then we will create an ensemble with all of them and make a table to compare their RMSE, and in the end, we will be able to choose the best model.
+
+The first step is to split our dataset into the Train and Test sets.
+
+```{r message=FALSE, warning=FALSE}
+set.seed(2049, sample.kind = "Rounding")
+
+test_index <- createDataPartition(exchange_mxn$BTC_close, times = 1, p = 0.2, list = FALSE)
+
+train_set <- exchange_mxn[-test_index,]
+
+test_set <- exchange_mxn[test_index,]
+```
+
+Now we are ready to train our models.
+
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+knn_model <- train(BTC_close ~ ., data = train_set, method = "knn", tuneGrid = data.frame(k = seq(3, 51, 2)))
+
+y_hat_knn <- predict(knn_model, test_set)
+
+control <- trainControl(method = "cv", number = 10, p = .9)
+
+glm_model <- train(BTC_close ~ ., method = "bayesglm", data = train_set,
+                   trControl = control)
+
+y_hat_glm <- predict(glm_model, test_set)
+
+mtry <- data.frame(mtry = c(2:21))
+rf_model <- train(BTC_close ~ ., data = train_set, method = "rf", tuneGrid = mtry, importance = TRUE)
+
+y_hat_rf <- predict(rf_model, test_set)
+
+br_model <- train(BTC_close ~ ., method = "blassoAveraged", data = train_set)
+
+y_hat_br <- predict(br_model, test_set)
+```
+
+## Plotting - Predictions of each model vs Test_set data.
+
+```{r echo=FALSE}
+par(mfcol = c(2,2))
+
+plot(y_hat_knn, test_set$BTC_close,
+      main = "knn Neighbors",
+      xlab = "Predicted Price",
+      ylab = "Real Price")
+
+plot(y_hat_glm, test_set$BTC_close,
+      main = "Generalized Linear Models (glm)",
+      xlab = "Predicted Price",
+      ylab = "Real Price")
+
+plot(y_hat_rf, test_set$BTC_close,
+      main = "Random Forest",
+      xlab = "Predicted Price",
+      ylab = "Real Price")
+
+plot(y_hat_br, test_set$BTC_close,
+      main = "Model Averaged (br)",
+      xlab = "Predicted Price",
+      ylab = "Real Price")
+
+par(mfcol = c(1,1))
+```
+
+# Results
+
+## Comparing the RMSE
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+knn_RMSE <- RMSE(y_hat_knn, test_set$BTC_close)
+RMSE_comp <- data.frame(Method = "knn", RMSE = knn_RMSE)
+
+glm_RMSE <- RMSE(y_hat_glm, test_set$BTC_close)
+RMSE_comp <- bind_rows(RMSE_comp, data.frame(Method = "glm", RMSE = glm_RMSE))
+
+rf_RMSE <- RMSE(y_hat_rf, test_set$BTC_close)
+RMSE_comp <- bind_rows(RMSE_comp, data.frame(Method = "rf", RMSE = rf_RMSE))
+
+br_RMSE <- RMSE(y_hat_br, test_set$BTC_close)
+RMSE_comp <- bind_rows(RMSE_comp, data.frame(Method = "br", RMSE = br_RMSE))
+
+RMSE_comp %>% knitr::kable()
+```
+
+The RMSE indicates the averaged estimated error in our predictions, so, for example, in the *knn* model we can make a wrong prediction by MXN 6,762. That's a difference of 4.76% considering the averaged Bitcoin price.
+
+Now that we have all the RMSE we can choose the one with the smallest loss function and that would be *glm* and then *br*, but before making an election, let's make an Ensemble of the four methods and see if an average makes better than all of them.
+
+## Creating an Ensemble.
+
+With an Ensemble, our prediction will be the average of the predictions of all models for each case.
+
+```{r}
+y_hat_ens <- (y_hat_knn + y_hat_glm + y_hat_rf + y_hat_br) / 4
+```
+
+And now we can compare its RMSE.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ens_RMSE <- RMSE(y_hat_ens, test_set$BTC_close)
+
+RMSE_comp <- bind_rows(RMSE_comp, data.frame(Method = "Ensemble", RMSE = ens_RMSE))
+
+RMSE_comp %>% knitr::kable()
+```
+
+As we can see, the best option it's the Ensemble model. It has an RMSE equivalent to 4.48% of the averaged Bitcoin price.
+
+## Translating our Algorithm
+
+Now that we have a final model, besides the RMSE, we can summarize our performance when our algorithm was applied to the Test Set.
+
+```{r}
+ens_var <- (y_hat_ens / test_set$BTC_close) - 1
+summary(ens_var)
+```
+
+This is the summary, in terms of percentage, of how accurate our predictions were when compared them with the Test set. We can see that 50% of our predictions have variability between -2.12% and 2.41% (RMSE equivalent to 4.48%) and, our median and mean are close to zero.
+
+In general, we can be satisfied with our model.
+
+```{r echo=FALSE}
+boxplot(ens_var,
+        main = "Boxplot of Variability - Ensemble model",
+        xlab = "Ensemble",
+        ylab = "Variability")
+```
+
+We have a compact box, but also we have some *outliers*, this  is relatively normal in this kind of predictions, mainly for three reasons:
+
+1. As every financial asset, Bitcoin is subject to sudden and, sometimes fake, news.
+2. Its price is driven by supply and demand, thus, it depends on the variability in the prices of other assets.
+3. Bitcoin is an asset with a very highly speculative use.
+
+And these reasons provoke steep movements that are almost impossible to predict.
+
+# Conclusions
+
+I expect that this analysis helps to understand a little better the Bitcoin behavior. As it was stated at the beginning of this document, and then proved with the analysis, even having good historic data, it's difficult to predict with extreme accuracy its price.
+
+This kind of prediction is subject to the **"Ceteris Paribus"** condition, which means, "only if all the other things remain the same". It's a way of saying that we can predict the price but only if all the previously observed behaviors stay equal. This condition is common in Economics and Financial predictions and, in this conditioning, resides one of the biggest limitations of these models.
+
+Further research needs to be made to add more variables to this model that helps us to make better predictions and, something important that has to be taken into account, is that Bitcoin isn't regulated yet in many countries, and in those in which already is, many changes are expected to come, of course, all of this will reformulate the way the Bitcoin is traded and valued.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
